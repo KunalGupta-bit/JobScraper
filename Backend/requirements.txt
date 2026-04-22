@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+playwright
+beautifulsoup4
+pandas
+pydantic
+sqlalchemy
+python-multipart
+lxml
