@@ -1,7 +1,12 @@
+import sys
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes import jobs
 from models import database
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Create tables
 database.Base.metadata.create_all(bind=database.engine)

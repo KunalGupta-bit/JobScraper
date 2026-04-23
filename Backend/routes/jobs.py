@@ -28,6 +28,7 @@ import asyncio
 
 async def run_scraper_task():
     """Background task to run scrapers, process data, and save to DB."""
+    errors = []
     try:
         # Run all scrapers concurrently
         internshala = InternshalaScraper()
@@ -48,7 +49,8 @@ async def run_scraper_task():
         raw_jobs = []
         for res in results:
             if isinstance(res, Exception):
-                print(f"A scraper failed with error: {res}")
+                errors.append(str(res))
+                print(f"A scraper failed with error: {str(res)}")
             elif isinstance(res, list):
                 raw_jobs.extend(res)
         
@@ -56,10 +58,9 @@ async def run_scraper_task():
         filtered_jobs = process_and_filter_jobs(raw_jobs)
         
         db = database.SessionLocal()
+        inserted_count = 0
         try:
             for job_data in filtered_jobs:
-                # Check for duplicates explicitly before inserting if needed,
-                # though SQLAlchemy UniqueConstraint will catch it (we'd need to handle IntegrityError).
                 existing = db.query(database.JobModel).filter(
                     database.JobModel.title == job_data['title'],
                     database.JobModel.company == job_data['company']
@@ -67,19 +68,32 @@ async def run_scraper_task():
                 if not existing:
                     new_job = database.JobModel(**job_data)
                     db.add(new_job)
+                    inserted_count += 1
             db.commit()
         except Exception as e:
+            errors.append(f"DB Error: {str(e)}")
             print(f"Error saving jobs: {e}")
             db.rollback()
         finally:
             db.close()
+            
+        return {"inserted": inserted_count, "total_raw": len(raw_jobs), "errors": errors}
     except Exception as e:
+        errors.append(str(e))
         print(f"Scraper task failed: {e}")
+        return {"error": str(e), "errors": errors}
+
+def sync_scrape_runner():
+    import sys
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    return asyncio.run(run_scraper_task())
 
 @router.post("/scrape")
 async def trigger_scrape():
-    await run_scraper_task()
-    return {"message": "Scraping completed."}
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, sync_scrape_runner)
+    return {"message": "Scraping completed.", "details": res}
 
 @router.get("/jobs", response_model=List[schemas.Job])
 def get_jobs(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
